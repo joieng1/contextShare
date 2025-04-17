@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import './App.css';
 import TreeItem from './TreeItem';
 import { DirectoryItem } from './types';
@@ -24,8 +24,11 @@ export default function FileCompilerApp() {
    */
   const handleSelectFolder = useCallback(async () => {
     setIsLoading(true);
-    setDirectoryStructure(null);
     setError(null);
+    setDirectoryStructure(null);
+    setSelectedFolder(null);
+    setSelectedFiles(new Set());
+    setCompiledContent('');
     try {
       const folderPath = await window.electronAPI.selectFolder();
       if (folderPath) {
@@ -200,6 +203,7 @@ export default function FileCompilerApp() {
   }, [compiledContent]);
 
   const fileCount = selectedFiles.size;
+  const canCompile = fileCount > 0;
   const canCopyOrSave =
     compiledContent.length > 0 && compiledContent !== 'Compiling files...';
 
@@ -212,11 +216,20 @@ export default function FileCompilerApp() {
 
       <div className="controls">
         <button type="button" onClick={handleSelectFolder} disabled={isLoading}>
-          {isLoading ? 'Loading...' : 'Select Folder'}
+          {isLoading && !selectedFolder ? 'Loading...' : 'Select Folder'}
         </button>
-        <button type="button" onClick={handleCompileFiles} disabled={isLoading}>
-          {isLoading ? 'Loading...' : 'Compile Selected Files'}
+        <button
+          type="button"
+          onClick={handleCompileFiles}
+          disabled={!canCompile || isLoading}
+        >
+          {isLoading && compiledContent === 'Compiling files...'
+            ? 'Compiling...'
+            : 'Compile Selected Files'}
         </button>
+        {selectedFolder && (
+          <div id="selected-folder-display">Selected: {selectedFolder}</div>
+        )}
       </div>
 
       {error && (
@@ -227,8 +240,10 @@ export default function FileCompilerApp() {
         <div className="file-browser">
           <h2>Files</h2>
           <div id="file-tree">
-            {isLoading && <div>Loading tree...</div>}
-            {!isLoading && <div>Please select a folder.</div>}
+            {isLoading && !directoryStructure && <div>Loading tree...</div>}
+            {!isLoading && !selectedFolder && (
+              <div>Please select a folder.</div>
+            )}
             {directoryStructure &&
               directoryStructure.length > 0 &&
               directoryStructure.map((item) => (
