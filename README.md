@@ -8,6 +8,16 @@
 
 <br>
 
+## ContextShare
+
+ContextShare is a utility application designed to streamline the process of preparing file content for use in Large Language Models. It allows users to:
+
+-   **Select a Directory:** Choose a root folder containing the files you want to include in your LLM context.
+-   **Browse Directory Structure:**  View a tree-like representation of the selected directory, making it easy to navigate and locate specific files.
+-   **Select Files:**  Individually select files or entire directories to include in the compilation.
+-   **Compile to Single Text File:**  Combine the contents of all selected files into a single, unified text output, formatted for optimal LLM consumption.
+-   **Copy to Clipboard:** Quickly copy the compiled text to your clipboard for easy pasting into your LLM prompt or configuration.
+-   **Save to File:** Save the compiled text directly to a file for later use.
 ## Starting Development
 
 Start the app in the `dev` environment:
