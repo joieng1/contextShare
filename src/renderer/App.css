@@ -110,6 +110,57 @@ button:disabled {
   font-size: 0.9rem;
 }
 
+.tree-item {
+  margin: 2px 0;
+}
+
+.tree-directory {
+  cursor: pointer;
+  user-select: none;
+}
+
+.tree-directory-header {
+  display: flex;
+  align-items: center;
+  padding: 3px;
+}
+
+.tree-directory-header:hover {
+  background-color: var(--hover-color);
+}
+
+.tree-toggle {
+  margin-right: 5px;
+  display: inline-block;
+  width: 16px;
+  text-align: center;
+}
+
+.tree-directory-children {
+  padding-left: 20px;
+}
+
+.tree-file {
+  padding: 3px 3px 3px 21px;
+  display: flex;
+  align-items: center;
+}
+
+.tree-file:hover {
+  background-color: var(--hover-color);
+}
+
+.tree-file label {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.file-checkbox {
+  margin-right: 5px;
+}
+
 h2 {
   margin-top: 0;
   color: var(--primary-color);
