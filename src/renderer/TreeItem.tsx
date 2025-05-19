@@ -1,9 +1,17 @@
-import React, { useState } from 'react';
-import { TreeItemProps, DirectoryItem } from './types';
+import React, { useState, memo } from 'react';
+import { DirectoryItem, DisplayDirectoryItem } from './types';
 
-export default function TreeItem({
+export interface TreeItemProps {
+  item: DisplayDirectoryItem;
+  onFileSelectionChange: (filePath: string, checked: boolean) => void;
+  onDirectorySelectionChange: (
+    directory: DirectoryItem,
+    checked: boolean,
+  ) => void;
+}
+
+export default memo(function TreeItem({
   item,
-  selectedFiles,
   onFileSelectionChange,
   onDirectorySelectionChange,
 }: TreeItemProps) {
@@ -27,61 +35,32 @@ export default function TreeItem({
    * @param {React.ChangeEvent<HTMLInputElement>} e - The change event from checkboxes
    */
   const handleCheckboxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const isSelected = e.target.checked;
+    const checkedStatus = e.target.checked;
     if (item.type === 'directory') {
-      onDirectorySelectionChange(item, isSelected);
+      const originalItem: DirectoryItem = {
+        name: item.name,
+        path: item.path,
+        type: item.type,
+        children: item.children as DirectoryItem[] | undefined,
+      };
+      onDirectorySelectionChange(originalItem, checkedStatus);
     } else {
-      onFileSelectionChange(item.path, isSelected);
+      onFileSelectionChange(item.path, checkedStatus);
     }
-  };
-
-  /**
-   * Determines if a directory checkbox should be checked or indeterminate.
-   * Recursively checks all children to compute state.
-   * @param {DirectoryItem} dir - The directory item to check.
-   * @returns {{ checked: boolean, indeterminate: boolean }} Checkbox state.
-   */
-  const getDirectoryCheckboxState = (
-    dir: DirectoryItem,
-  ): { checked: boolean; indeterminate: boolean } => {
-    let allChecked = true;
-    let someChecked = false;
-    let hasFiles = false;
-
-    /**
-     * Recursively checks children to determine selection state.
-     * @param {DirectoryItem} currentItem - The current item being checked.
-     */
-    const checkChildren = (currentItem: DirectoryItem) => {
-      if (currentItem.type === 'file') {
-        hasFiles = true;
-        if (selectedFiles.has(currentItem.path)) {
-          someChecked = true;
-        } else {
-          allChecked = false;
-        }
-      } else if (currentItem.children) {
-        currentItem.children.forEach(checkChildren);
-      }
-    };
-
-    if (dir.children) {
-      dir.children.forEach(checkChildren);
-    } else {
-      allChecked = false; // Empty directory can't be fully checked
-    }
-
-    // If no files in directory/subdirs, it can't be checked/indeterminate
-    if (!hasFiles) {
-      return { checked: false, indeterminate: false };
-    }
-
-    return { checked: allChecked, indeterminate: someChecked && !allChecked };
   };
 
   if (item.type === 'directory') {
-    const { checked, indeterminate } = getDirectoryCheckboxState(item);
-    const headerId = `dir-header-${item.path.replace(/[^a-zA-Z0-9]/g, '-')}`; // Create unique ID
+    // Use pre-calculated states from item prop
+    const {
+      isChecked = false,
+      isIndeterminate = false,
+      hasFiles = false,
+    } = item;
+    const headerId = `dir-header-${item.path.replace(/[^a-zA-Z0-9]/g, '-')}`;
+
+    // Only show checkbox if the directory branch actually contains files
+    const showCheckbox = hasFiles;
+
     return (
       <div className="tree-item tree-directory">
         <div
@@ -96,19 +75,21 @@ export default function TreeItem({
           aria-expanded={isExpanded}
         >
           <span className="tree-toggle">{isExpanded ? '▼' : '▶'}</span>
-          <input
-            type="checkbox"
-            aria-labelledby={headerId}
-            className="file-checkbox directory-checkbox"
-            checked={checked}
-            ref={(el) => {
-              if (el) {
-                el.indeterminate = indeterminate;
-              }
-            }}
-            onChange={handleCheckboxChange}
-          />
-          <span id={`${headerId}-label`}>{item.name}</span>{' '}
+          {showCheckbox && (
+            <input
+              type="checkbox"
+              aria-labelledby={headerId}
+              className="file-checkbox directory-checkbox"
+              checked={isChecked}
+              ref={(el) => {
+                if (el) {
+                  el.indeterminate = isIndeterminate;
+                }
+              }}
+              onChange={handleCheckboxChange}
+            />
+          )}
+          <span id={`${headerId}-label`}>{item.name}</span>
         </div>
         <div
           className={`tree-directory-children ${isExpanded ? '' : 'collapsed'}`}
@@ -118,8 +99,7 @@ export default function TreeItem({
             item.children.map((child) => (
               <TreeItem
                 key={child.path}
-                item={child}
-                selectedFiles={selectedFiles}
+                item={child as DisplayDirectoryItem}
                 onFileSelectionChange={onFileSelectionChange}
                 onDirectorySelectionChange={onDirectorySelectionChange}
               />
@@ -129,6 +109,8 @@ export default function TreeItem({
     );
   }
 
+  // File item
+  const { isSelected = false } = item;
   const inputId = `file-checkbox-${item.path.replace(/[^a-zA-Z0-9]/g, '-')}`;
   return (
     <div className="tree-item tree-file">
@@ -137,11 +119,11 @@ export default function TreeItem({
           id={inputId}
           type="checkbox"
           className="file-checkbox"
-          checked={selectedFiles.has(item.path)}
+          checked={isSelected}
           onChange={handleCheckboxChange}
         />
         <span>{item.name}</span>
       </label>
     </div>
   );
-}
+});
