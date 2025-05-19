@@ -14,3 +14,11 @@ export interface TreeItemProps {
     isSelected: boolean,
   ) => void;
 }
+
+export interface Prompt {
+  id: string; // Unique identifier
+  name: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+}

@@ -1,3 +1,5 @@
+import { Prompt } from './types'; // Assuming Prompt is in types.ts
+
 // Define the structure for directory items, matching main.ts
 interface DirectoryItem {
   name: string;
@@ -17,6 +19,17 @@ interface ElectronAPI {
   saveCompiledContent: (
     content: string,
   ) => Promise<{ success: boolean; filePath?: string; error?: string }>;
+  getPrompts: () => Promise<{
+    success: boolean;
+    data?: Prompt[];
+    error?: string;
+  }>;
+  savePrompt: (
+    promptData: Partial<Prompt>,
+  ) => Promise<{ success: boolean; data?: Prompt; error?: string }>;
+  deletePrompt: (
+    promptId: string,
+  ) => Promise<{ success: boolean; promptId?: string; error?: string }>;
 }
 
 // Extend the global Window interface

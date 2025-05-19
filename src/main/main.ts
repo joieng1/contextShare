@@ -11,7 +11,26 @@
 import path from 'path';
 import fs from 'fs';
 import { app, BrowserWindow, shell, ipcMain, dialog } from 'electron';
+import { v4 as uuidv4 } from 'uuid';
+import { Prompt } from '../renderer/types'; // Adjust path if necessary
 import { resolveHtmlPath } from './util';
+
+// Dynamically import electron-store
+let StoreModule: any;
+let store: any; // Declare store here
+
+import('electron-store')
+  .then((module) => {
+    StoreModule = module.default;
+    // Initialize store after the module is loaded
+    store = new StoreModule({
+      defaults: {
+        prompts: [],
+      },
+    });
+    console.log('[Main Process] Electron-store initialized. Path:', store.path);
+  })
+  .catch((err) => console.error('Failed to load electron-store', err));
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -152,6 +171,92 @@ function setupIpcHandlers() {
     } catch (error: any) {
       console.error('Error saving file:', error);
       return { success: false, error: error.message || 'Failed to save file.' };
+    }
+  });
+
+  ipcMain.handle('get-prompts', async () => {
+    console.log("[IPC Main] Received 'get-prompts' request.");
+    try {
+      const prompts = store.get('prompts', []);
+      return { success: true, data: prompts };
+    } catch (error: any) {
+      console.error("[IPC Main] Error in 'get-prompts':", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('save-prompt', async (event, promptData: Partial<Prompt>) => {
+    console.log(
+      "[IPC Main] Received 'save-prompt' request with data:",
+      promptData,
+    );
+    try {
+      const currentPrompts: Prompt[] = store.get('prompts', []);
+      const now = new Date().toISOString();
+      let savedPrompt: Prompt;
+
+      if (promptData.id) {
+        // Update existing prompt
+        const index = currentPrompts.findIndex((p) => p.id === promptData.id);
+        if (index !== -1) {
+          currentPrompts[index] = {
+            ...currentPrompts[index],
+            ...promptData,
+            name: promptData.name!,
+            content: promptData.content!,
+            updatedAt: now,
+          };
+          savedPrompt = currentPrompts[index];
+          console.log('[IPC Main] Updated prompt with ID:', promptData.id);
+        } else {
+          console.error(
+            '[IPC Main] Prompt ID not found for update:',
+            promptData.id,
+          );
+          return {
+            success: false,
+            error: 'Prompt ID not found for update.',
+          };
+        }
+      } else {
+        // Create new prompt
+        const newPrompt: Prompt = {
+          id: uuidv4(),
+          name: promptData.name!,
+          content: promptData.content!,
+          createdAt: now,
+          updatedAt: now,
+        };
+        currentPrompts.push(newPrompt);
+        savedPrompt = newPrompt;
+        console.log('[IPC Main] Created new prompt with ID:', newPrompt.id);
+      }
+
+      store.set('prompts', currentPrompts);
+      return { success: true, data: savedPrompt };
+    } catch (error: any) {
+      console.error("[IPC Main] Error in 'save-prompt':", error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('delete-prompt', async (event, promptId: string) => {
+    console.log(
+      "[IPC Main] Received 'delete-prompt' request for ID:",
+      promptId,
+    );
+    try {
+      const currentPrompts: Prompt[] = store.get('prompts', []);
+      const updatedPrompts = currentPrompts.filter((p) => p.id !== promptId);
+      if (currentPrompts.length === updatedPrompts.length) {
+        console.warn('[IPC Main] Prompt ID not found for deletion:', promptId);
+      }
+      store.set('prompts', updatedPrompts);
+      console.log('[IPC Main] Deleted prompt with ID:', promptId);
+      return { success: true, promptId };
+    } catch (error: any) {
+      console.error("[IPC Main] Error in 'delete-prompt':", error);
+      return { success: false, error: error.message };
     }
   });
 }

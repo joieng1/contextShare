@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import { Prompt } from '../renderer/types'; // Adjust path if necessary
 
 // Define the API structure
 const electronAPI = {
@@ -34,6 +35,22 @@ const electronAPI = {
     content: string,
   ): Promise<{ success: boolean; filePath?: string; error?: string }> =>
     ipcRenderer.invoke('save-compiled', content),
+
+  getPrompts: (): Promise<{
+    success: boolean;
+    data?: Prompt[];
+    error?: string;
+  }> => ipcRenderer.invoke('get-prompts'),
+
+  savePrompt: (
+    promptData: Partial<Prompt>, // ID is optional for new prompts
+  ): Promise<{ success: boolean; data?: Prompt; error?: string }> =>
+    ipcRenderer.invoke('save-prompt', promptData),
+
+  deletePrompt: (
+    promptId: string,
+  ): Promise<{ success: boolean; promptId?: string; error?: string }> =>
+    ipcRenderer.invoke('delete-prompt', promptId),
 };
 
 // Expose the API to the renderer process
