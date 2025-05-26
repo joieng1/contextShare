@@ -13,6 +13,11 @@ ContextShare empowers users with the following capabilities:
 - **Clipboard Integration:** The compiled text can be copied to the system clipboard with a single click, facilitating easy pasting into LLM interfaces, prompts, or configuration files.
 - **File Saving:** Users can save the compiled text directly to a `.txt` file, allowing for persistent storage and later reuse of the context.
 
+### 4. Prompts Management
+
+- **Description**: Allows users to create, save, edit, delete, and use custom prompts. This helps in quickly populating the main text area with frequently used instructions or templates.
+- **Key Components**: `PromptsManager.tsx`, `App.tsx` (view switching), `main.ts` (IPC handlers for `electron-store`).
+
 ## Purpose
 
 The primary goal of ContextShare is to streamline the often tedious and error-prone process of manually gathering and formatting context for LLMs. By automating these steps, it aims to enhance productivity for developers, researchers, and anyone working with LLMs that require significant textual input.
@@ -21,6 +26,7 @@ The primary goal of ContextShare is to streamline the often tedious and error-pr
 
 - **Electron:** For building the cross-platform desktop application.
 - **React:** For creating the user interface components and managing application state.
+- **Zustand:** For efficient and scalable state management in the React frontend, particularly for global or complex state.
 - **React Router:** For navigation within the application (though minimally used in this specific single-view utility).
 - **Webpack:** For bundling the application's assets and modules.
 - **React Fast Refresh:** For enabling a fast development loop with hot reloading.

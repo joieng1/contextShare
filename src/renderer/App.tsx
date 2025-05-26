@@ -1,21 +1,125 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useMemo } from 'react';
 import './App.css';
 import TreeItem from './TreeItem';
-import { DirectoryItem } from './types';
+import { DirectoryItem, DisplayDirectoryItem } from './types';
+import PromptsManager from './PromptsManager';
+import { useAppStore } from './store/appStore';
 
 // --- Main App Component ---
 export default function FileCompilerApp() {
-  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
-  const [directoryStructure, setDirectoryStructure] = useState<
-    DirectoryItem[] | null
-  >(null);
-  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
-  const [compiledContent, setCompiledContent] = useState<string>('');
-  const [copyButtonText, setCopyButtonText] =
-    useState<string>('Copy to Clipboard');
-  const [saveButtonText, setSaveButtonText] = useState<string>('Save to File');
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  // Get state and actions from the Zustand store
+  const {
+    currentView,
+    selectedFolder,
+    directoryStructure,
+    compiledContent,
+    copyButtonText,
+    saveButtonText,
+    isLoading,
+    error,
+    selectionVersion,
+    setCurrentView,
+    setSelectedFolder,
+    setDirectoryStructure,
+    setCompiledContent,
+    setCopyButtonText,
+    setSaveButtonText,
+    setIsLoading,
+    setError,
+    bumpSelectionVersion,
+    resetSession,
+  } = useAppStore();
+
+  const selectionRef = useRef<Set<string>>(new Set());
+  const textRef = useRef<HTMLTextAreaElement>(null);
+
+  // Memoized calculation of the display tree structure
+  const displayDirectoryStructure = useMemo(() => {
+    if (!directoryStructure) return null;
+
+    const processItem = (
+      originalItem: DirectoryItem,
+      selectionSet: Set<string>,
+    ): DisplayDirectoryItem => {
+      const newItem: Partial<DisplayDirectoryItem> & {
+        type: string;
+        name: string;
+        path: string;
+        children?: DisplayDirectoryItem[];
+      } = {
+        type: originalItem.type,
+        name: originalItem.name,
+        path: originalItem.path,
+      } as any;
+
+      if (originalItem.type === 'file') {
+        newItem.isSelected = selectionSet.has(originalItem.path);
+      } else if (originalItem.type === 'directory') {
+        newItem.hasFiles = false;
+        let effectiveChildrenCountForCheckbox = 0;
+        let checkedChildrenCount = 0;
+        let partiallyCheckedChildrenCount = 0;
+
+        if (originalItem.children && originalItem.children.length > 0) {
+          newItem.children = originalItem.children.map((child) =>
+            processItem(child, selectionSet),
+          );
+
+          // eslint-disable-next-line no-restricted-syntax
+          for (const processedChild of newItem.children!) {
+            if (processedChild.type === 'file') {
+              newItem.hasFiles = true;
+              effectiveChildrenCountForCheckbox += 1;
+              if (processedChild.isSelected) {
+                checkedChildrenCount += 1;
+              }
+            } else if (processedChild.type === 'directory') {
+              if (processedChild.hasFiles) {
+                newItem.hasFiles = true;
+                effectiveChildrenCountForCheckbox += 1;
+                if (processedChild.isChecked) {
+                  checkedChildrenCount += 1;
+                } else if (processedChild.isIndeterminate) {
+                  partiallyCheckedChildrenCount += 1;
+                }
+              }
+            }
+          }
+        }
+
+        if (newItem.hasFiles) {
+          if (partiallyCheckedChildrenCount > 0) {
+            newItem.isChecked = false;
+            newItem.isIndeterminate = true;
+          } else if (
+            effectiveChildrenCountForCheckbox > 0 &&
+            checkedChildrenCount === effectiveChildrenCountForCheckbox
+          ) {
+            newItem.isChecked = true;
+            newItem.isIndeterminate = false;
+          } else if (
+            checkedChildrenCount > 0 &&
+            checkedChildrenCount < effectiveChildrenCountForCheckbox
+          ) {
+            newItem.isChecked = false;
+            newItem.isIndeterminate = true;
+          } else {
+            newItem.isChecked = false;
+            newItem.isIndeterminate = false;
+          }
+        } else {
+          newItem.isChecked = false;
+          newItem.isIndeterminate = false;
+        }
+      }
+      return newItem as DisplayDirectoryItem;
+    };
+
+    return directoryStructure.map((item) =>
+      processItem(item, selectionRef.current),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [directoryStructure, selectionVersion, selectionRef]);
 
   /**
    * Handler for selecting a folder.
@@ -25,31 +129,30 @@ export default function FileCompilerApp() {
   const handleSelectFolder = useCallback(async () => {
     setIsLoading(true);
     setError(null);
-    setDirectoryStructure(null);
-    setSelectedFolder(null);
-    setSelectedFiles(new Set());
-    setCompiledContent('');
+    resetSession(); // Reset relevant states
+    selectionRef.current.clear();
+
     try {
       const folderPath = await window.electronAPI.selectFolder();
       if (folderPath) {
         setSelectedFolder(folderPath);
-        const structureResult =
+        const structure =
           await window.electronAPI.getDirectoryStructure(folderPath);
-        if ('error' in structureResult) {
-          setError(
-            `Error getting directory structure: ${structureResult.error}`,
-          );
-          setDirectoryStructure(null);
-        } else {
-          setDirectoryStructure(structureResult);
-        }
+        setDirectoryStructure(structure as DirectoryItem[]);
       }
     } catch (err: any) {
-      setError(`Error selecting folder: ${err.message || err}`);
+      setError(`Operation failed: ${err.message || err}`);
+      setDirectoryStructure(null);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [
+    setIsLoading,
+    setError,
+    resetSession,
+    setSelectedFolder,
+    setDirectoryStructure,
+  ]);
 
   /**
    * Handler for selection or deselection of a file
@@ -58,17 +161,15 @@ export default function FileCompilerApp() {
    */
   const handleFileSelectionChange = useCallback(
     (filePath: string, isSelected: boolean) => {
-      setSelectedFiles((prevSelected) => {
-        const newSelected = new Set(prevSelected);
-        if (isSelected) {
-          newSelected.add(filePath);
-        } else {
-          newSelected.delete(filePath);
-        }
-        return newSelected;
-      });
+      const sel = selectionRef.current;
+      if (isSelected) {
+        sel.add(filePath);
+      } else {
+        sel.delete(filePath);
+      }
+      bumpSelectionVersion();
     },
-    [],
+    [bumpSelectionVersion],
   );
 
   /**
@@ -90,19 +191,17 @@ export default function FileCompilerApp() {
 
       collectFiles(directory);
 
-      setSelectedFiles((prevSelected) => {
-        const newSelected = new Set(prevSelected);
-        filesToUpdate.forEach((filePath) => {
-          if (isSelected) {
-            newSelected.add(filePath);
-          } else {
-            newSelected.delete(filePath);
-          }
-        });
-        return newSelected;
+      const sel = selectionRef.current;
+      filesToUpdate.forEach((filePath) => {
+        if (isSelected) {
+          sel.add(filePath);
+        } else {
+          sel.delete(filePath);
+        }
       });
+      bumpSelectionVersion();
     },
-    [],
+    [bumpSelectionVersion],
   );
 
   /**
@@ -110,47 +209,34 @@ export default function FileCompilerApp() {
    * Reads each file, formats its content, and updates the compiledContent state.
    */
   const handleCompileFiles = useCallback(async () => {
-    if (selectedFiles.size === 0 || !selectedFolder) return;
+    if (selectionRef.current.size === 0 || !selectedFolder) return;
 
     setIsLoading(true);
     setError(null);
     setCompiledContent('Compiling files...');
 
     try {
-      // Sort for consistent order
-      const filePaths = Array.from(selectedFiles || new Set()).sort();
+      const filePaths = Array.from(selectionRef.current || new Set()).sort();
 
-      // Read files concurrently
-      const results = await Promise.all(
-        filePaths.map(async (filePath) => {
-          const result = await window.electronAPI.readFile(filePath);
-          return { filePath, result };
-        }),
-      );
-
-      let compiledText = '';
-      results.forEach(({ filePath, result }) => {
-        if (typeof result === 'string') {
-          const relativePath = filePath
-            .replace(selectedFolder, '')
-            .replace(/^[/\\]/, ''); // Make path relative
-          compiledText += `"${relativePath}"\n\n\n`;
-          compiledText += `${result}\n`;
-          compiledText += '******** END OF FILE **********\n\n';
-        } else {
-          // Handle error for specific file
-          compiledText += `// Error reading file: ${filePath}\n// ${result.error}\n\n`;
-        }
+      const result = await window.electronAPI.compileFilesWorker({
+        files: filePaths,
+        root: selectedFolder,
       });
-
-      setCompiledContent(compiledText);
+      if (result && typeof result.compiledText === 'string') {
+        setCompiledContent(result.compiledText);
+      } else {
+        setError(
+          'Compilation completed but returned no content or an invalid format.',
+        );
+        setCompiledContent('');
+      }
     } catch (err: any) {
       setError(`Error compiling files: ${err.message || err}`);
-      setCompiledContent(''); // Clear content on error
+      setCompiledContent('');
     } finally {
       setIsLoading(false);
     }
-  }, [selectedFiles, selectedFolder]);
+  }, [selectedFolder, setIsLoading, setError, setCompiledContent]);
 
   /**
    * Handler copies context to clipboard.
@@ -168,7 +254,7 @@ export default function FileCompilerApp() {
       .catch((err) => {
         setError(`Failed to copy: ${err}`);
       });
-  }, [compiledContent]);
+  }, [compiledContent, setCopyButtonText, setError]);
 
   /**
    * Handler for saving compiled content to a file.
@@ -179,20 +265,15 @@ export default function FileCompilerApp() {
     setIsLoading(true); // Indicate saving process
     setError(null);
     try {
-      const result =
-        await window.electronAPI.saveCompiledContent(compiledContent);
-      if (result.success) {
-        setSaveButtonText('Saved!');
-        setTimeout(() => setSaveButtonText('Save to File'), 1500);
-      } else {
-        setError(`Failed to save file: ${result.error || 'Unknown error'}`);
-      }
+      await window.electronAPI.saveCompiledContent(compiledContent);
+      setSaveButtonText('Saved!');
+      setTimeout(() => setSaveButtonText('Save to File'), 1500);
     } catch (err: any) {
-      setError(`Error saving file: ${err.message || err}`);
+      setError(`Failed to save file: ${err.message || 'Unknown error'}`);
     } finally {
       setIsLoading(false);
     }
-  }, [compiledContent]);
+  }, [compiledContent, setIsLoading, setError, setSaveButtonText]);
 
   /**
    * Effect to reset button text when compiled content changes
@@ -200,94 +281,142 @@ export default function FileCompilerApp() {
   useEffect(() => {
     setCopyButtonText('Copy to Clipboard');
     setSaveButtonText('Save to File');
-  }, [compiledContent]);
+    if (textRef.current) textRef.current.value = compiledContent;
+  }, [compiledContent, setCopyButtonText, setSaveButtonText]);
 
-  const fileCount = selectedFiles.size;
+  const fileCount = selectionRef.current.size;
   const canCompile = fileCount > 0;
   const canCopyOrSave =
     compiledContent.length > 0 && compiledContent !== 'Compiling files...';
 
+  const getSelectFolderButtonText = () => {
+    if (isLoading && !selectedFolder) {
+      return 'Loading Folder...';
+    }
+    if (selectedFolder) {
+      return 'Change Folder';
+    }
+    return 'Select Folder';
+  };
+
   return (
     <div className="container">
       <header>
-        <h1>File Compiler for Chatbot Context</h1>
-        <p>Select files to compile into a single text file for LLM context</p>
+        <h1>ContextShare</h1> {/* Main app title */}
+        <div className="view-switcher">
+          <button
+            type="button"
+            onClick={() => setCurrentView('files')}
+            disabled={currentView === 'files'}
+            style={{ marginRight: '10px' }}
+          >
+            File Compiler
+          </button>
+          <button
+            type="button"
+            onClick={() => setCurrentView('prompts')}
+            disabled={currentView === 'prompts'}
+          >
+            Prompts Manager
+          </button>
+        </div>
       </header>
-
-      <div className="controls">
-        <button type="button" onClick={handleSelectFolder} disabled={isLoading}>
-          {isLoading && !selectedFolder ? 'Loading...' : 'Select Folder'}
-        </button>
-        <button
-          type="button"
-          onClick={handleCompileFiles}
-          disabled={!canCompile || isLoading}
-        >
-          {isLoading && compiledContent === 'Compiling files...'
-            ? 'Compiling...'
-            : 'Compile Selected Files'}
-        </button>
-        {selectedFolder && (
-          <div id="selected-folder-display">Selected: {selectedFolder}</div>
-        )}
-      </div>
-
-      {error && (
-        <div style={{ color: 'red', marginBottom: '10px' }}>Error: {error}</div>
-      )}
-
-      <div className="main-content">
-        <div className="file-browser">
-          <h2>Files</h2>
-          <div id="file-tree">
-            {isLoading && !directoryStructure && <div>Loading tree...</div>}
-            {!isLoading && !selectedFolder && (
-              <div>Please select a folder.</div>
+      <main className="content-area">
+        {currentView === 'files' && (
+          <>
+            <div className="controls">
+              <button
+                type="button"
+                onClick={handleSelectFolder}
+                disabled={isLoading}
+              >
+                {getSelectFolderButtonText()}
+              </button>
+              <button
+                type="button"
+                onClick={handleCompileFiles}
+                disabled={!canCompile || isLoading}
+              >
+                {isLoading && compiledContent === 'Compiling files...'
+                  ? 'Compiling...'
+                  : 'Compile Selected Files'}
+              </button>
+              {selectedFolder && (
+                <div id="selected-folder-display">
+                  Selected: {selectedFolder}
+                </div>
+              )}
+            </div>
+            {error && (
+              <div style={{ color: 'red', marginBottom: '10px' }}>
+                Error: {error}
+              </div>
             )}
-            {directoryStructure &&
-              directoryStructure.length > 0 &&
-              directoryStructure.map((item) => (
-                <TreeItem
-                  key={item.path}
-                  item={item}
-                  selectedFiles={selectedFiles || new Set()}
-                  onFileSelectionChange={handleFileSelectionChange}
-                  onDirectorySelectionChange={handleDirectorySelectionChange}
+            <div className="main-content">
+              <div className="file-browser">
+                <h2>Files</h2>
+                <div id="file-tree">
+                  {isLoading && <div>Loading tree...</div>}
+                  {!isLoading && !selectedFolder && (
+                    <div>Please select a folder.</div>
+                  )}
+                  {!isLoading &&
+                    selectedFolder &&
+                    displayDirectoryStructure &&
+                    displayDirectoryStructure.length > 0 &&
+                    displayDirectoryStructure.map((item) => (
+                      <TreeItem
+                        key={item.path}
+                        item={item}
+                        onFileSelectionChange={handleFileSelectionChange}
+                        onDirectorySelectionChange={
+                          handleDirectorySelectionChange
+                        }
+                      />
+                    ))}
+                  {/* If !isLoading, selectedFolder is true, but displayDirectoryStructure is null/empty
+                      AND error is null, nothing specific is shown here. The general error display
+                      (already conditioned with !isLoading) handles error messages. */}
+                </div>
+              </div>
+
+              <div className="compiled-content">
+                <h2>Compiled Output</h2>
+                <div className="actions">
+                  <button
+                    type="button"
+                    onClick={handleCopyToClipboard}
+                    disabled={!canCopyOrSave || isLoading}
+                  >
+                    {copyButtonText}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveToFile}
+                    disabled={!canCopyOrSave || isLoading}
+                  >
+                    {/* Text for save button based on current App.tsx logic for consistency */}
+                    {isLoading &&
+                    compiledContent &&
+                    compiledContent !== 'Compiling files...'
+                      ? 'Saving...'
+                      : saveButtonText}
+                  </button>
+                </div>
+                <div id="file-count">{fileCount} file(s) selected</div>
+                <textarea
+                  ref={textRef}
+                  id="compiled-output"
+                  readOnly
+                  defaultValue={compiledContent}
+                  placeholder={isLoading ? 'Processing...' : ''}
                 />
-              ))}
-            {!isLoading && selectedFolder && !directoryStructure && !error && (
-              <div>Could not load directory structure.</div>
-            )}
-          </div>
-        </div>
-
-        <div className="compiled-content">
-          <h2>Compiled Output</h2>
-          <div className="actions">
-            <button
-              type="button"
-              onClick={handleCopyToClipboard}
-              disabled={!canCopyOrSave || isLoading}
-            >
-              {copyButtonText}
-            </button>
-            <button
-              type="button"
-              onClick={handleSaveToFile}
-              disabled={!canCopyOrSave || isLoading}
-            >
-              {isLoading && !canCopyOrSave ? 'Saving...' : saveButtonText}
-            </button>
-          </div>
-          <div id="file-count">{fileCount} file(s) selected</div>
-          <textarea
-            id="compiled-output"
-            readOnly
-            value={compiledContent}
-            placeholder={isLoading ? 'Processing...' : ''}
-          />
-        </div>
-      </div>
+              </div>
+            </div>
+          </>
+        )}
+        {currentView === 'prompts' && <PromptsManager />}
+      </main>
     </div>
   );
 }
