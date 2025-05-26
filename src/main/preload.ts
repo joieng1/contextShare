@@ -18,13 +18,10 @@ const electronAPI = {
   getDirectoryStructure: (folderPath: string): Promise<any> =>
     ipcRenderer.invoke('get-directory-structure', folderPath),
 
-  /**
-   * Read file content
-   * @param {string} filePath - Path to file
-   * @returns {Promise<string|Object>} File content as string or error object
-   */
+  /*
   readFile: (filePath: string): Promise<string | { error: string }> =>
     ipcRenderer.invoke('read-file', filePath),
+  */
 
   /**
    * Save compiled content to a file
@@ -51,6 +48,13 @@ const electronAPI = {
     promptId: string,
   ): Promise<{ success: boolean; promptId?: string; error?: string }> =>
     ipcRenderer.invoke('delete-prompt', promptId),
+
+  // Added for worker-based compilation
+  compileFilesWorker: (args: {
+    files: string[];
+    root: string;
+  }): Promise<{ compiledText?: string; error?: string }> =>
+    ipcRenderer.invoke('compile-files-worker', args),
 };
 
 // Expose the API to the renderer process

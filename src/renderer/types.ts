@@ -5,14 +5,12 @@ export interface DirectoryItem {
   children?: DirectoryItem[];
 }
 
-export interface TreeItemProps {
-  item: DirectoryItem;
-  selectedFiles: Set<string>;
-  onFileSelectionChange: (filePath: string, isSelected: boolean) => void;
-  onDirectorySelectionChange: (
-    directory: DirectoryItem,
-    isSelected: boolean,
-  ) => void;
+export interface DisplayDirectoryItem extends DirectoryItem {
+  isSelected?: boolean;
+  isChecked?: boolean;
+  isIndeterminate?: boolean;
+  hasFiles?: boolean;
+  children?: DisplayDirectoryItem[];
 }
 
 export interface Prompt {

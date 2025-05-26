@@ -15,7 +15,7 @@ interface ElectronAPI {
   getDirectoryStructure: (
     folderPath: string,
   ) => Promise<DirectoryItem[] | { error: string }>; // Return type includes potential error
-  readFile: (filePath: string) => Promise<string | { error: string }>; // Return type includes potential error
+  // readFile: (filePath: string) => Promise<string | { error: string }>; // Return type includes potential error
   saveCompiledContent: (
     content: string,
   ) => Promise<{ success: boolean; filePath?: string; error?: string }>;
@@ -30,6 +30,12 @@ interface ElectronAPI {
   deletePrompt: (
     promptId: string,
   ) => Promise<{ success: boolean; promptId?: string; error?: string }>;
+
+  // Added for worker-based compilation
+  compileFilesWorker: (args: {
+    files: string[];
+    root: string;
+  }) => Promise<{ compiledText?: string; error?: string }>;
 }
 
 // Extend the global Window interface

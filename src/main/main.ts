@@ -12,25 +12,32 @@ import path from 'path';
 import fs from 'fs';
 import { app, BrowserWindow, shell, ipcMain, dialog } from 'electron';
 import { v4 as uuidv4 } from 'uuid';
-import { Prompt } from '../renderer/types'; // Adjust path if necessary
+import { Worker } from 'worker_threads';
+import { Prompt } from '../renderer/types';
 import { resolveHtmlPath } from './util';
 
-// Dynamically import electron-store
-let StoreModule: any;
-let store: any; // Declare store here
+// Store initialization
+let store: any = null;
 
-import('electron-store')
-  .then((module) => {
-    StoreModule = module.default;
-    // Initialize store after the module is loaded
-    store = new StoreModule({
+/**
+ * Initialize electron-store asynchronously
+ */
+async function initializeStore() {
+  try {
+    const StoreModule = await import('electron-store');
+    const Store = StoreModule.default;
+    store = new Store({
       defaults: {
         prompts: [],
       },
     });
     console.log('[Main Process] Electron-store initialized. Path:', store.path);
-  })
-  .catch((err) => console.error('Failed to load electron-store', err));
+    return store;
+  } catch (err) {
+    console.error('Failed to load electron-store', err);
+    throw err;
+  }
+}
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -79,6 +86,11 @@ async function getDirectoryStructure(
 
   const structurePromises = items.map(
     async (item): Promise<DirectoryItem | null> => {
+      // Skip node_modules directories
+      if (item.name === 'node_modules' && item.isDirectory()) {
+        return null;
+      }
+
       const itemPath = path.join(dirPath, item.name);
 
       if (item.isDirectory()) {
@@ -123,37 +135,22 @@ function setupIpcHandlers() {
     'get-directory-structure',
     async (event, folderPath: string) => {
       if (!folderPath || typeof folderPath !== 'string') {
-        return { error: 'Invalid folder path provided.' };
+        throw new Error('Invalid folder path provided.');
       }
       try {
         const structure = await getDirectoryStructure(folderPath);
         return structure;
       } catch (error: any) {
         console.error('Error getting directory structure:', error);
-        return { error: error.message || 'Failed to get directory structure.' };
+        throw new Error(error.message || 'Failed to get directory structure.');
       }
     },
   );
 
-  // Read file content
-  ipcMain.handle('read-file', async (event, filePath: string) => {
-    if (!filePath || typeof filePath !== 'string') {
-      return { error: 'Invalid file path provided.' };
-    }
-    try {
-      // Basic path validation
-      const content = await fs.promises.readFile(filePath, 'utf8');
-      return content;
-    } catch (error: any) {
-      console.error('Error reading file:', error);
-      return { error: error.message || 'Failed to read file.' };
-    }
-  });
-
   // Save compiled content to a file
   ipcMain.handle('save-compiled', async (event, content: string) => {
     if (typeof content !== 'string') {
-      return { success: false, error: 'Invalid content provided.' };
+      throw new Error('Invalid content provided.');
     }
     const result = await dialog.showSaveDialog({
       title: 'Save Compiled Output',
@@ -170,18 +167,75 @@ function setupIpcHandlers() {
       return { success: true, filePath: result.filePath };
     } catch (error: any) {
       console.error('Error saving file:', error);
-      return { success: false, error: error.message || 'Failed to save file.' };
+      throw new Error(error.message || 'Failed to save file.');
     }
   });
+
+  // IPC handler for compiling files in a worker thread
+  ipcMain.handle(
+    'compile-files-worker',
+    async (event, { files, root }: { files: string[]; root: string }) => {
+      return new Promise((resolve, reject) => {
+        // Ensure the worker path is correct, especially for packaged apps
+        const workerPath =
+          process.env.NODE_ENV === 'development'
+            ? path.join(__dirname, 'compileWorker.bundle.dev.js') // Adjusted path for dev
+            : path.join(__dirname, 'compileWorker.js'); // Adjusted path for prod
+
+        const worker = new Worker(workerPath, {
+          workerData: { files, root }, // Pass data to worker if needed immediately
+        });
+
+        worker.postMessage({ files, root });
+
+        worker.on('message', async (message) => {
+          if (message.error) {
+            console.error('[Worker Error]', message.error);
+            reject(new Error(message.error));
+          } else {
+            resolve({ compiledText: message.compiledText });
+          }
+          // Terminate worker
+          try {
+            await worker.terminate();
+          } catch (err) {
+            console.error('Failed to terminate worker', err);
+          }
+        });
+
+        worker.on('error', async (err) => {
+          console.error('[Worker Initialization Error]', err);
+          reject(new Error(err.message));
+          // Terminate worker
+          try {
+            await worker.terminate();
+          } catch (termErr) {
+            console.error('Failed to terminate worker after error', termErr);
+          }
+        });
+
+        worker.on('exit', (code) => {
+          if (code !== 0) {
+            console.error(
+              `[Worker Exit] Worker stopped with exit code ${code}`,
+            );
+          }
+        });
+      });
+    },
+  );
 
   ipcMain.handle('get-prompts', async () => {
     console.log("[IPC Main] Received 'get-prompts' request.");
     try {
+      if (!store) {
+        throw new Error('Store not initialized');
+      }
       const prompts = store.get('prompts', []);
-      return { success: true, data: prompts };
+      return prompts;
     } catch (error: any) {
       console.error("[IPC Main] Error in 'get-prompts':", error);
-      return { success: false, error: error.message };
+      throw new Error(error.message || 'Failed to get prompts.');
     }
   });
 
@@ -191,6 +245,9 @@ function setupIpcHandlers() {
       promptData,
     );
     try {
+      if (!store) {
+        throw new Error('Store not initialized');
+      }
       const currentPrompts: Prompt[] = store.get('prompts', []);
       const now = new Date().toISOString();
       let savedPrompt: Prompt;
@@ -213,10 +270,7 @@ function setupIpcHandlers() {
             '[IPC Main] Prompt ID not found for update:',
             promptData.id,
           );
-          return {
-            success: false,
-            error: 'Prompt ID not found for update.',
-          };
+          throw new Error('Prompt ID not found for update.');
         }
       } else {
         // Create new prompt
@@ -233,10 +287,10 @@ function setupIpcHandlers() {
       }
 
       store.set('prompts', currentPrompts);
-      return { success: true, data: savedPrompt };
+      return savedPrompt;
     } catch (error: any) {
       console.error("[IPC Main] Error in 'save-prompt':", error);
-      return { success: false, error: error.message };
+      throw new Error(error.message || 'Failed to save prompt.');
     }
   });
 
@@ -246,17 +300,22 @@ function setupIpcHandlers() {
       promptId,
     );
     try {
+      if (!store) {
+        throw new Error('Store not initialized');
+      }
       const currentPrompts: Prompt[] = store.get('prompts', []);
+      const originalLength = currentPrompts.length;
       const updatedPrompts = currentPrompts.filter((p) => p.id !== promptId);
-      if (currentPrompts.length === updatedPrompts.length) {
+      if (originalLength === updatedPrompts.length) {
         console.warn('[IPC Main] Prompt ID not found for deletion:', promptId);
+        throw new Error('Prompt ID not found for deletion.');
       }
       store.set('prompts', updatedPrompts);
       console.log('[IPC Main] Deleted prompt with ID:', promptId);
-      return { success: true, promptId };
+      return { promptId };
     } catch (error: any) {
       console.error("[IPC Main] Error in 'delete-prompt':", error);
-      return { success: false, error: error.message };
+      throw new Error(error.message || 'Failed to delete prompt.');
     }
   });
 }
@@ -327,9 +386,12 @@ app.on('window-all-closed', () => {
 
 app
   .whenReady()
-  .then(() => {
+  .then(async () => {
+    // Initialize store first
+    await initializeStore();
+
     createWindow();
-    setupIpcHandlers(); // Setup IPC handlers after window creation
+    setupIpcHandlers(); // Setup IPC handlers after store and window creation
     app.on('activate', () => {
       // On macOS it's common to re-create a window in the app when the
       // dock icon is clicked and there are no other windows open.
